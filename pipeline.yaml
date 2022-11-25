@@ -1,0 +1,89 @@
+variables:
+  DOTNET_CLI_HOME: '/tmp'
+  
+trigger: none
+
+pool:
+  name: Linux-pool
+stages:  
+ - stage: build_test_and_publish
+   pool: Linux-pool
+   jobs:
+   - job: build_dotnetcore_app
+     displayName: 'Build .Net Core app'
+     steps:
+     - task: DotNetCoreCLI@2
+       displayName: 'dotnet build'
+       inputs:
+         command: build
+         projects: AcademySampleProject/AcademySampleProject.csproj
+     - task: DotNetCoreCLI@2
+       displayName: Publish
+       inputs:
+         command: publish
+         publishWebProjects: false
+         projects: AcademySampleProject/AcademySampleProject.csproj
+         arguments: '--configuration release --output $(build.artifactstagingdirectory)'
+         zipAfterPublish: True
+     - task: ExtractFiles@1
+       displayName: 'Extract app files'
+       inputs:
+         archiveFilePatterns: '$(build.artifactstagingdirectory)/AcademySampleProject.zip'
+         destinationFolder: '$(build.artifactstagingdirectory)/docker/app'
+     - task: eliostruyf.build-task.custom-build-task.file-creator@6
+       displayName: 'Create Dockerfile'
+       inputs:
+         fileoverwrite: true
+         filepath: $(build.artifactstagingdirectory)/docker/app/Dockerfile
+         filecontent: |
+           FROM mcr.microsoft.com/dotnet/aspnet:6.0
+           WORKDIR /app
+           COPY . .
+           EXPOSE 8080
+           ENV ASPNETCORE_URLS http://*:8080
+           ENTRYPOINT ["dotnet", "AcademySampleProject.dll"]
+     - task: Docker@2
+       displayName: 'Build Docker Image'
+       inputs:
+         command: 'build'
+         containerRegistry: 'nexus_registry'
+         repository: 'lkhintibidze/academysampleproject'
+         tags: |
+           latest
+         Dockerfile: '$(build.artifactstagingdirectory)/docker/app/Dockerfile'
+         buildContext: '$(build.artifactstagingdirectory)/docker/app'
+      
+     - task: Docker@2
+       displayName: 'Push Docker Image'
+       inputs:
+         command: 'push'
+         containerRegistry: 'nexus_registry'
+         repository: 'lkhintibidze/academysampleproject'
+         tags: |
+           latest
+            
+ - stage: deploy_to_Test
+   displayName: Deploy To deploy_to_Test environment
+   dependsOn: build_test_and_publish
+   jobs: 
+    - job: begin_deployment
+      displayName: Begin deployment?  
+      steps:
+      - task: HelmInstaller@0
+        inputs:
+          helmVersion: '3.8.0'
+          checkLatestHelmVersion: false
+          installKubectl: true
+          checkLatestKubectl: false
+      - task: HelmDeploy@0
+        inputs:
+          connectionType: 'Kubernetes Service Connection'
+          kubernetesServiceConnection: 'azure-devops-luka'
+          namespace: 'lkhintibidze'
+          command: 'upgrade'
+          arguments: '--atomic --wait --timeout 30s'
+          releaseName: 'testapi-luka'
+          chartType: 'FilePath'
+          chartPath: '$(Build.SourcesDirectory)/helmcharts/bereja'
+          valueFile: '$(Build.SourcesDirectory)/helmcharts/bereja/values.yaml'
+

@@ -1,0 +1,31 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: {{ include "bereja.fullname" . }}
+  labels:
+     {{- include "bereja.labels" . | nindent 4 }}
+spec:
+  gateways:
+    - {{ .Values.gateway.gatewayName | quote }} 
+  hosts:
+    - {{ .Values.gateway.host | quote }}
+{{- if .Values.gateway.additionalHosts }}
+{{- range .Values.gateway.additionalHosts }}
+    - {{ . | quote }}
+{{- end -}}
+{{- end }}
+  http:
+    - match:
+{{- range .Values.gateway.matchPrefix }}
+      - uri:
+          prefix: {{ . | quote }}
+{{- end }}
+{{- if .Values.gateway.rewriteUri }}
+      rewrite:
+        uri: {{ .Values.gateway.rewriteUri | quote }}
+{{- end }}
+      route:
+      - destination:
+          host: {{ include "bereja.fullname" . }}
+{{- end }}
